@@ -6,8 +6,7 @@ import { useState, useEffect } from "react";
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://nnmpvcpetybyulfuagnr.supabase.co';
-
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ubXB2Y3BldHlieXVsZnVhZ25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUxNjAzMTcsImV4cCI6MjA2MDczNjMxN30.8j2USyByfFaI1KFh7_vOEeS4R0y7ZiMG2ehxug4-OfM';                    // 
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ubXB2Y3BldHlieXVsZnVhZ25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUxNjAzMTcsImV4cCI6MjA2MDczNjMxN30.8j2USyByfFaI1KFh7_vOEeS4R0y7ZiMG2ehxug4-OfM';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
@@ -58,31 +57,30 @@ export default function PlanningApp() {
   const [entries, setEntries] = useState([]);
   const [name, setName] = useState("");
 
+  useEffect(() => {
+    // 1) Charger tout ce qui est déjà dans la base Supabase
+    supabase.from('inscriptions').select('*').then(({ data }) => {
+      setEntries(data || []);
+    });
 
-useEffect(() => {
-  // 1) Charger tout ce qui est déjà dans la base Supabase
-  supabase.from('inscriptions').select('*').then(({ data }) => {
-    setEntries(data || []);
-  });
-
-  // 2) Surveiller en "live" les nouvelles inscriptions et suppressions
-  const sub = supabase
-    .channel('inscriptions')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'inscriptions' },
-      payload => {
-        if (payload.eventType === 'INSERT') {
-          setEntries(current => [...current, payload.new]);
+    // 2) Surveiller en "live" les nouvelles inscriptions et suppressions
+    const sub = supabase
+      .channel('inscriptions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inscriptions' },
+        payload => {
+          if (payload.eventType === 'INSERT') {
+            setEntries(current => [...current, payload.new]);
+          }
+          if (payload.eventType === 'DELETE') {
+            setEntries(current => current.filter(e => e.id !== payload.old.id));
+          }
         }
-        if (payload.eventType === 'DELETE') {
-          setEntries(current => current.filter(e => e.id !== payload.old.id));
-        }
-      }
-    )
-    .subscribe();
+      )
+      .subscribe();
 
-  // 3) Quand on quitte la page, on arrête l'écoute
-  return () => supabase.removeChannel(sub);
-}, []);  // ← ce "[]" veut dire "une seule fois, quand la page s'ouvre"
+    // 3) Quand on quitte la page, on arrête l'écoute
+    return () => supabase.removeChannel(sub);
+  }, []);
 
   /* Génère 30 jours */
   const calendar = [];
@@ -107,12 +105,36 @@ useEffect(() => {
   const venueSpans = spanCalc(calendar, r => r.iso + "|" + r.venue);
 
   /* actions */
-  const signUp = (row) => {
+  const signUp = async (row) => {
     if (!name.trim()) return alert("Veuillez saisir votre nom.");
     if (row.count >= 2) return;
-    setEntries([...entries, { id: Date.now(), name: name.trim(), date: row.iso, venue: row.venue, slot: row.slot }]);
+    
+    const { error } = await supabase
+      .from('inscriptions')
+      .insert([{ 
+        name: name.trim(), 
+        date: row.iso, 
+        venue: row.venue, 
+        slot: row.slot 
+      }]);
+      
+    if (error) {
+      console.error('Error inserting:', error);
+      alert("Erreur lors de l'inscription");
+    }
   };
-  const removeEntry = (id) => setEntries(entries.filter(e => e.id !== id));
+
+  const removeEntry = async (id) => {
+    const { error } = await supabase
+      .from('inscriptions')
+      .delete()
+      .eq('id', id);
+      
+    if (error) {
+      console.error('Error deleting:', error);
+      alert("Erreur lors de la suppression");
+    }
+  };
 
   /* styles */
   const css = {
