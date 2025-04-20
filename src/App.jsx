@@ -3,27 +3,34 @@
 // ===================================================================
 
 import { useState, useEffect } from "react";
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = 'https://nnmpvcpetybyulfuagnr.supabase.co';
+
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ubXB2Y3BldHlieXVsZnVhZ25yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUxNjAzMTcsImV4cCI6MjA2MDczNjMxN30.8j2USyByfFaI1KFh7_vOEeS4R0y7ZiMG2ehxug4-OfM';                    // 
+
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 /* ---------------------- LISTE DES PUBLICATIONS ---------------------- */
 const publicationsText = `Publications à exposer (Mars - Avril 2025):
 展示​书刊 (2025 年 3 月- 4月)
-Brochure Vivez pour toujours   永远享受美好的生命 （体验​版）
+Brochure Vivez pour toujours   永远享受美好的生命 （体验​版）
 Réveillez-vous ! no 1 de 2022 - Un monde dans la tourmente : Comment tenir bon
-《警醒！》2022年第1期 - “世界一片混乱，怎样好好生活”
+《警醒！》2022年第1期 - "世界一片混乱，怎样好好生活"
 
 Publications à garder à portée de main （不会​展示​出来:
-Reviens à Jéhovah 《回到​耶和华​身边》册子
-Des revues et d’autres publications dans des langues qui sont souvent demandées
-《守望台》2019年第1期 “你知道上帝是谁吗？”`;
+Reviens à Jéhovah 《回到​耶和华​身边》册子
+Des revues et d'autres publications dans des langues qui sont souvent demandées
+《守望台》2019年第1期 "你知道上帝是谁吗？"`;
 
 /* --------------------------- LIEUX/HORAIRES --------------------------- */
 const venues = [
-  { name: "Marché La Courneuve – 8 Mai 1945", map: "https://www.google.com/maps?q=48.9302,2.3969", slots: ["08:00‑09:00","09:00‑10:00","10:00‑11:00","11:00‑12:00"] },
+  { name: "Marché La Courneuve – 8 Mai 1945", map: "https://www.google.com/maps?q=48.9302,2.3969", slots: ["08:00‑09:00","09:00‑10:00","10:00‑11:00","11:00‑12:00"] },
   { name: "Bobigny Pablo‑Picasso / Tunnel", map: "https://www.google.com/maps?q=48.9063,2.4458", slots: ["15:00‑16:00","16:00‑17:00","17:00‑18:30"] },
-  { name: "La Courneuve – Six Routes", map: "https://www.google.com/maps?q=48.9343,2.3922", slots: ["08:30‑09:30","09:30‑10:30"] },
+  { name: "La Courneuve – Six Routes", map: "https://www.google.com/maps?q=48.9343,2.3922", slots: ["08:30‑09:30","09:30‑10:30"] },
 ];
 
-/* ------------------------ AIDE FORMATAGE DATE ------------------------ */
+/* ------------------------ AIDE FORMATAGE DATE ------------------------ */
 const fmtISO = (d) => d.toISOString().split("T")[0];
 const fmtLongFR = (dateStr) => {
   const [y, m, day] = dateStr.split("-").map(Number);
@@ -51,11 +58,33 @@ export default function PlanningApp() {
   const [entries, setEntries] = useState([]);
   const [name, setName] = useState("");
 
-  /* LocalStorage */
-  useEffect(() => { setEntries(JSON.parse(localStorage.getItem("inscriptions") || "[]")); }, []);
-  useEffect(() => { localStorage.setItem("inscriptions", JSON.stringify(entries)); }, [entries]);
 
-  /* Génère 30 jours */
+useEffect(() => {
+  // 1) Charger tout ce qui est déjà dans la base Supabase
+  supabase.from('inscriptions').select('*').then(({ data }) => {
+    setEntries(data || []);
+  });
+
+  // 2) Surveiller en "live" les nouvelles inscriptions et suppressions
+  const sub = supabase
+    .channel('inscriptions')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'inscriptions' },
+      payload => {
+        if (payload.eventType === 'INSERT') {
+          setEntries(current => [...current, payload.new]);
+        }
+        if (payload.eventType === 'DELETE') {
+          setEntries(current => current.filter(e => e.id !== payload.old.id));
+        }
+      }
+    )
+    .subscribe();
+
+  // 3) Quand on quitte la page, on arrête l'écoute
+  return () => supabase.removeChannel(sub);
+}, []);  // ← ce "[]" veut dire "une seule fois, quand la page s'ouvre"
+
+  /* Génère 30 jours */
   const calendar = [];
   const today = new Date();
   for (let i = 0; i <= 30; i++) {
